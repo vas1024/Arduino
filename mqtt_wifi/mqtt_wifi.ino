@@ -43,6 +43,7 @@ void setup() {
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
+  client.setBufferSize(1024);
 
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
@@ -140,6 +141,9 @@ void parseCSV(const char* payload, unsigned int length ) {
   int j = 0;
   int i = 0;
   String num_str = "";
+
+  Serial.printf("got new message, length %d \n", length);
+
   while( i < length and j < NUM_LEDS ){
     if( payload[i] >= '0' and payload[i] <= '9' ){
       num_str = num_str + payload[i];
@@ -147,6 +151,10 @@ void parseCSV(const char* payload, unsigned int length ) {
     else{
       if( num_str.length() > 0 ){
         arr[j] = num_str.toInt();
+
+        Serial.print( arr[j] );
+        Serial.print( " ");
+
         j++;
         num_str = "";
       }
@@ -160,6 +168,7 @@ void parseCSV(const char* payload, unsigned int length ) {
     arr[j] = num_str.toInt();
   }
   
+  Serial.println(" all ");
 
 }
 
