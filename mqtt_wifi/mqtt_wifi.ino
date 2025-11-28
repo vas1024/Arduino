@@ -8,12 +8,16 @@
 
 //#define NUM_LEDS 180  // my tape has 180 leds
 #define NUM_LEDS 180
+
+#define MESSAGE_BUFFER_SIZE 1024  // mqtt message max size
+#define LED_BRIGTNESS 40 // brightness 0..255
 //#define STRIP_PIN 2  // D2 = GPIO 4
 #define STRIP_PIN 2
 
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, STRIP_PIN, NEO_GRB + NEO_KHZ800);
 int arr[NUM_LEDS];
+
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, STRIP_PIN, NEO_GRB + NEO_KHZ800);
 bool newMessageInQ = false; 
 bool ledsOn = false;
 
@@ -43,7 +47,7 @@ void setup() {
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
-  client.setBufferSize(1024);
+  client.setBufferSize(MESSAGE_BUFFER_SIZE);
 
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
@@ -74,27 +78,10 @@ void loop() {
 
   if( newMessageInQ ){
     newMessageInQ = false;
-/*    
-    if( ledsOn ) {
-      ledsOn = false;
-      for(int i = 0; i < NUM_LEDS; i++) {
-        strip.setPixelColor(i, 0);  
-      }
-      strip.show();
-    }
-    else {
-      ledsOn = true;
-      for( int i = 0; i < NUM_LEDS; i++ ){
-        arr[i] = i;
-      }
-      for (int i = 0; i < NUM_LEDS; i++)  strip.setPixelColor(i, strip.ColorHSV(arr[i] * 256, 123, 123));
-      strip.show();
-    }
-*/
 
 
   for (int i = 0; i < NUM_LEDS; i++)  {
-    strip.setPixelColor(i, strip.ColorHSV(arr[i] * 256, 254, 64));
+    strip.setPixelColor(i, strip.ColorHSV(arr[i] * 255, 254, LED_BRIGTNESS));
     if (i % 20 == 0) {
       yield();
     }
@@ -111,7 +98,11 @@ void loop() {
 void callback(char* topic, byte* payload, unsigned int length) {
   
   newMessageInQ = true;
-  parseCSV( (char*)payload, length );
+//  parseCSV( (char*)payload, length );
+  int size = min( NUM_LEDS, (int)length );
+  for( int i = 0; i < size; i++) {
+    arr[i] = payload[i];
+  }
 
 } 
 
