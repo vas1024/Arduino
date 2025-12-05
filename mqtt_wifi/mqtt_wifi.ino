@@ -53,7 +53,7 @@ void setup() {
     Serial.print("Attempting MQTT connection...");
     if (client.connect("ESP8266Client")) {
       Serial.println("connected");
-      client.subscribe("test/topic");
+      client.subscribe("test/topic", 1);  // quos level 1 чтение с подтверждением
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -85,6 +85,7 @@ void loop() {
     if (i % 20 == 0) {
       yield();
     }
+
   }
 
   strip.show();
@@ -103,7 +104,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   for( int i = 0; i < size; i++) {
     arr[i] = payload[i];
   }
-
 } 
 
 
