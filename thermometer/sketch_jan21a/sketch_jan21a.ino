@@ -14,8 +14,8 @@ const int mqtt_port = 1883;
 const unsigned long sendInterval = 30000;  // 30 секунд
 unsigned long lastSendTime = 0;
 // MQTT топики
-const char* tempTopic1 = "arduino_thermometer/air_inside";
-const char* tempTopic2 = "arduino_thermometer/air_outside";
+const char* tempTopic1 = "arduino_thermometer/air_outside";
+const char* tempTopic2 = "arduino_thermometer/air_inside";
 const char* tempTopic3 = "arduino_thermometer/heater";
 
 //#define ONE_WIRE_BUS D1
@@ -25,7 +25,9 @@ const char* tempTopic3 = "arduino_thermometer/heater";
 //#define PIN_SENSOR3 0   // D3 (осторожно - используется при загрузке)
 #define PIN_SENSOR3 14  // D5 - безопасно
 
-
+//PIN_SENSOR1 мапится в tempTopic1
+//PIN_SENSOR2 мапится в tempTopic2
+//PIN_SENSOR3 мапится в tempTopic3
 
 OneWire oneWire1(PIN_SENSOR1);
 OneWire oneWire2(PIN_SENSOR2);
@@ -50,10 +52,10 @@ void setup() {
   Serial.println("start temperature sensors");
 
   // Включаем режим подтягивающего резистора для дата пинов датчиков темп
-  pinMode(PIN_SENSOR1, INPUT_PULLUP);   
-  pinMode(PIN_SENSOR2, INPUT_PULLUP);   
-  pinMode(PIN_SENSOR3, INPUT_PULLUP);  
-  delay(100);
+  //pinMode(PIN_SENSOR1, INPUT_PULLUP);   
+  //pinMode(PIN_SENSOR2, INPUT_PULLUP);   
+  //pinMode(PIN_SENSOR3, INPUT_PULLUP);  
+  //delay(100);
 
   sensor1.begin();
   sensor2.begin();
@@ -169,7 +171,7 @@ void sendTemperature(int sensorNum) {
   if (tempC != DEVICE_DISCONNECTED_C) {
     // Форматируем температуру (2 знак после запятой)
     char tempStr[10];
-    dtostrf(tempC, 5, 2, tempStr);  // 5 символа всего, 2 после запятой
+    dtostrf(tempC, 1, 2, tempStr);  // 5 символа всего, 2 после запятой
     
     // Отправляем в MQTT
     if (client.publish(tempTopic, tempStr, true)) {
