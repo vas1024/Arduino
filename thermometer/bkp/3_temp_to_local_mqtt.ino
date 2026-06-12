@@ -12,9 +12,7 @@ const char* mqtt_server = "192.168.1.3";
 const int mqtt_port = 1883;
 // Интервал отправки (миллисекунды)
 const unsigned long sendInterval = 30000;  // 30 секунд
-const unsigned long sendIntervalRightech = 300000;  // 5 мин
 unsigned long lastSendTime = 0;
-unsigned long lastSendTimeRightech = 0;
 // MQTT топики
 const char* tempTopic1 = "arduino_thermometer/air_outside";
 const char* tempTopic2 = "arduino_thermometer/air_inside";
@@ -42,20 +40,6 @@ DallasTemperature sensor3(&oneWire3);
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-WiFiClient espRightech;
-PubSubClient rightechClient(espRightech);
-
-
-// --- Настройки Rightech ---
-const char* rightech_server = "dev.rightech.io";
-const char* rightech_client_id = "vas-haus-pz"; 
-const char* rightech_topic = "haus/arduino/temperature";
-
-// Переменные для усреднения
-float tempSum[3] = {0, 0, 0};
-int countSamples[3] = {0, 0, 0};
-
-
 
 void setup() {
   delay(2000);  // Даем время для стабилизации
@@ -82,7 +66,6 @@ void setup() {
   
   // Настройка MQTT
   client.setServer(mqtt_server, mqtt_port);
-  rightechClient.setServer(rightech_server, 1883);
   
   Serial.println("Система запущена");
 
@@ -110,14 +93,6 @@ void loop() {
     sendTemperature(3);    
     lastSendTime = currentTime;
   }
-
-
-  currentTime = millis();
-  if (currentTime - lastSendTimeRightech >= sendIntervalRightech) {
-    sendToRightech();
-    lastSendTimeRightech = currentTime;
-  }
-
   
   // Короткая пауза
   delay(100);
@@ -196,7 +171,7 @@ void sendTemperature(int sensorNum) {
   if (tempC != DEVICE_DISCONNECTED_C) {
     // Форматируем температуру (2 знак после запятой)
     char tempStr[10];
-    dtostrf(tempC, 1, 2, tempStr);  // min 1 символа всего, 2 после запятой
+    dtostrf(tempC, 1, 2, tempStr);  // 5 символа всего, 2 после запятой
     
     // Отправляем в MQTT
     if (client.publish(tempTopic, tempStr, true)) {
@@ -209,10 +184,6 @@ void sendTemperature(int sensorNum) {
       Serial.print("Ошибка отправки в MQTT в топик ");
       Serial.println(tempTopic);
     }
-
-    tempSum[sensorNum - 1] += tempC;
-    countSamples[sensorNum - 1]++;
-
     
   } else {
     Serial.print("Ошибка датчика ");
@@ -221,50 +192,3 @@ void sendTemperature(int sensorNum) {
     sensor->begin(); // пробуем переинициализировать для работы в следующем цикле
   }
 }
-
-
-
-void sendToRightech() {
-
-  
-  String avg[3];
-  // Считаем среднее
-  for( int i = 0; i < 3; i++ ){
-    if( countSamples[i] == 0 ){ 
-      avg[i]="null";
-    } else {
-      avg[i] = String( tempSum[i] / countSamples[i] );
-    }
-
-  }
-
-  // Формируем JSON пакет (строго под вашу модель)
-  // ВНИМАНИЕ: ключи "temperature" и т.д. должны совпадать с кодами в модели Rightech
-  String payload = "{";
-  payload += "\"air_outside\":" + avg[0] + ",";
-  payload += "\"air_inside\":" + avg[1] + ",";
-  payload += "\"heater\":" + avg[2];
-  payload += "}";
-
-  Serial.println("Отправка в Rightech...");
-  
-  if (!rightechClient.connected()) {
-    if (rightechClient.connect(rightech_client_id)) {
-       rightechClient.publish(rightech_topic, payload.c_str());
-       Serial.println("Успешно: " + payload);
-    } else {
-       Serial.println("Ошибка связи с Rightech");
-    }
-  } else {
-     rightechClient.publish(rightech_topic, payload.c_str());
-  }
-
-  // Сброс накопителей
-  for( int i = 0; i < 3; i++){
-    tempSum[i] = 0;
-    countSamples[i] = 0;
-  }
-  rightechClient.disconnect(); // Отключаемся, чтобы не висеть в лимитах
-}
-
-
