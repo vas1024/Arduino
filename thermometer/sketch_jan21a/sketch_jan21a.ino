@@ -12,13 +12,11 @@ const char* mqtt_server = "192.168.1.3";
 const int mqtt_port = 1883;
 // Интервал отправки (миллисекунды)
 const unsigned long sendInterval = 30000;  // 30 секунд
-const unsigned long sendIntervalRightech = 300000;  // 5 мин
 unsigned long lastSendTime = 0;
-unsigned long lastSendTimeRightech = 0;
-// MQTT топики
-const char* tempTopic1 = "arduino_thermometer/air_outside";
-const char* tempTopic2 = "arduino_thermometer/air_inside";
-const char* tempTopic3 = "arduino_thermometer/heater";
+// MQTT локальные топики
+const char* tempTopic1 = "arduino_thermometer/air_inside";
+const char* tempTopic2 = "arduino_thermometer/heater";
+const char* tempTopic3 = "arduino_thermometer/air_outside";
 
 //#define ONE_WIRE_BUS D1
 //#define ONE_WIRE_BUS 5  // GPIO5 (это и есть D1)
@@ -50,6 +48,8 @@ PubSubClient rightechClient(espRightech);
 const char* rightech_server = "dev.rightech.io";
 const char* rightech_client_id = "vas-haus-pz"; 
 const char* rightech_topic = "haus/arduino/temperature";
+const unsigned long sendIntervalRightech = 300000;  // 5 мин
+unsigned long lastSendTimeRightech = 0;
 
 // Переменные для усреднения
 float tempSum[3] = {0, 0, 0};
@@ -147,27 +147,24 @@ void setupWiFi() {
 }
 
 
+
 void reconnectMQTT() {
-  // Пытаемся подключиться пока не получится
-  while (!client.connected()) {
-    Serial.print("Подключение к MQTT...");
-    
-    // Client ID с MAC адресом для уникальности
-    String clientId = "ArduinoThermometer-";
-    clientId += String(WiFi.macAddress());
-    
-    // Подключаемся 
-    if (client.connect(clientId.c_str())) {
-      Serial.println("подключено");
-      
-    } else {
-      Serial.print("ошибка, rc=");
-      Serial.print(client.state());
-      Serial.println(" пробуем через 5 секунд");
-      delay(5000);
-    }
+  if (client.connected()) return;
+  
+  Serial.print("Подключение к MQTT...");
+  
+  String clientId = "ArduinoThermometer-";
+  clientId += String(WiFi.macAddress());
+  
+  if (client.connect(clientId.c_str())) {
+    Serial.println("подключено");
+  } else {
+    Serial.print("ошибка, rc=");
+    Serial.print(client.state());
+    Serial.println(" — попробуем в следующем цикле");
   }
 }
+
 
 
 void sendTemperature(int sensorNum) {
@@ -198,17 +195,22 @@ void sendTemperature(int sensorNum) {
     char tempStr[10];
     dtostrf(tempC, 1, 2, tempStr);  // min 1 символа всего, 2 после запятой
     
-    // Отправляем в MQTT
-    if (client.publish(tempTopic, tempStr, true)) {
-      Serial.print("Отправлено: ");
-      Serial.print(tempStr);
-      Serial.print(" °C");
-      Serial.print("  в топик ");
-      Serial.println(tempTopic);
+    // Отправляем в local MQTT
+    if (client.connected()) {
+      if (client.publish(tempTopic, tempStr, true)) {
+        Serial.print("Отправлено: ");
+        Serial.print(tempStr);
+        Serial.print(" °C в топик ");
+        Serial.println(tempTopic);
+      } else {
+        Serial.print("Ошибка отправки в топик ");
+        Serial.println(tempTopic);
+      }
     } else {
-      Serial.print("Ошибка отправки в MQTT в топик ");
-      Serial.println(tempTopic);
+      Serial.println("Локальный MQTT недоступен, пропускаем");
     }
+
+
 
     tempSum[sensorNum - 1] += tempC;
     countSamples[sensorNum - 1]++;
