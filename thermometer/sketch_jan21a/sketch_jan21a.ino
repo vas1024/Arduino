@@ -2,6 +2,8 @@
 #include <DallasTemperature.h>
 #include <ESP8266WiFi.h>        
 #include <PubSubClient.h>
+#include <WiFiClientSecure.h>
+#include <ESP8266HTTPClient.h>
 
 
 // Настройки WiFi
@@ -37,6 +39,22 @@ DallasTemperature sensor1(&oneWire1);
 DallasTemperature sensor2(&oneWire2);
 DallasTemperature sensor3(&oneWire3);
 
+struct Sensors {
+  const char* topic;
+  DallasTemperature* dallas;
+  String temp;
+};
+
+int const numOfSensors = 3;
+Sensors sensors[numOfSensors] = {
+  {tempTopic1, &sensor1,  ""},
+  {tempTopic2, &sensor2,  ""},
+  {tempTopic3, &sensor3,  ""},
+};
+
+
+
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -50,6 +68,19 @@ const char* rightech_client_id = "vas-haus-pz";
 const char* rightech_topic = "haus/arduino/temperature";
 const unsigned long sendIntervalRightech = 300000;  // 5 мин
 unsigned long lastSendTimeRightech = 0;
+//https://dev.rightech.io/#?v=dashboard&m=dashboards&id=69f6eb5d27411287b241875a&t=journal
+//ip14922@gmail.com
+//System-1system-1
+
+
+// --- Настройки InfluxDb Grafana ---
+const String influxUrl = "https://us-central1-1.gcp.cloud2.influxdata.com/api/v2/write?org=36d3009f718d515a&bucket=bucket1&precision=s";
+const String influxToken = "Token aaIYdhng3-hZSxEd_mN7CgvqsZCiHGUHrDeUCQkGiVuYsnBfLRsQ6g3lTRsDPq8AV2NAmDQba4rAFIiubGKoCQ=="; 
+const unsigned long sendIntervalInflux = 300000; // 5 мин
+unsigned long lastSendTimeInflux = 60000;
+// https://grafana.com/
+// авторизовался через google
+
 
 // Переменные для усреднения
 float tempSum[3] = {0, 0, 0};
@@ -65,18 +96,9 @@ void setup() {
   setupWiFi();
 
 
-  Serial.println("start temperature sensors");
-
-  // Включаем режим подтягивающего резистора для дата пинов датчиков темп
-  //pinMode(PIN_SENSOR1, INPUT_PULLUP);   
-  //pinMode(PIN_SENSOR2, INPUT_PULLUP);   
-  //pinMode(PIN_SENSOR3, INPUT_PULLUP);  
-  //delay(100);
-
-  sensor1.begin();
-  sensor2.begin();
-  sensor3.begin();
-  Serial.println("DS18B20 Temperature Sensor");
+  Serial.println("start initializing temperature sensors");
+  for (int i = 0; i < numOfSensors; i++) sensors[i].dallas->begin();
+  Serial.println("DS18B20 Temperature Sensors");
 
 
   
@@ -117,6 +139,14 @@ void loop() {
     sendToRightech();
     lastSendTimeRightech = currentTime;
   }
+
+  currentTime = millis();
+  if (currentTime - lastSendTimeInflux >= sendIntervalInflux) {
+    lastSendTimeInflux = currentTime;
+    updateSensors();
+    sendToInflux();
+  }
+
 
   
   // Короткая пауза
@@ -269,4 +299,60 @@ void sendToRightech() {
   rightechClient.disconnect(); // Отключаемся, чтобы не висеть в лимитах
 }
 
+
+
+
+void updateSensors() {
+  for (int i = 0; i < numOfSensors; i++) {
+    sensors[i].dallas->requestTemperatures();
+    float t = sensors[i].dallas->getTempCByIndex(0);
+    if (t != DEVICE_DISCONNECTED_C) {
+      char buf[10];
+      dtostrf(t, 1, 2, buf);
+      sensors[i].temp = String(buf);
+    } else {
+      sensors[i].temp = "";
+      Serial.println("error with sensor number: " + String(i) + "  topic: " + sensors[i].topic);
+      sensors[i].dallas->begin();
+    }
+  }
+}
+
+
+void sendToInflux(){
+  
+    if (WiFi.status() == WL_CONNECTED) {
+      // Создаем объект защищенного клиента
+      WiFiClientSecure client;
+      client.setInsecure(); // Игнорируем проверку отпечатков сертификатов ради стабильности
+      HTTPClient http;
+
+      // ====================================================
+      //  ОТПРАВКА В INFLUXDB CLOUD (Формат Line Protocol)
+      // ====================================================
+      Serial.print("Отправка в InfluxDB Cloud... ");
+      if (http.begin(client, influxUrl)) {
+        http.addHeader("Authorization", influxToken);
+        http.addHeader("Content-Type", "text/plain; charset=utf-8");
+        
+        // Собираем строку Line Protocol. Важно: ровно один пробел между тегами и полями
+        String linePayload = "home_sensors,location=haus ";  // measurement,теги ПРОБЕЛ
+        for (int i = 0; i < numOfSensors; i++) {
+          if (i > 0) linePayload += ",";
+          linePayload += String(sensors[i].topic) + "=" + sensors[i].temp;
+        }
+        int httpCode = http.POST(linePayload);
+
+        Serial.println("sent payload:  " + linePayload );
+        Serial.println("http code " + String( httpCode ) );
+        
+        http.end();
+      }
+      
+    } else {
+      Serial.println("Ошибка: Нет подключения к Wi-Fi!");
+    }
+
+
+}
 
