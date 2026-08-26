@@ -46,7 +46,7 @@ struct Sensors {
 };
 
 int const numOfSensors = 3;
-Sensors sensors[numOfSensors] = {
+Sensors sensors[numOfSensors] = {      // array of Sensors structures
   {tempTopic1, &sensor1,  ""},
   {tempTopic2, &sensor2,  ""},
   {tempTopic3, &sensor3,  ""},
@@ -67,7 +67,7 @@ const char* rightech_server = "dev.rightech.io";
 const char* rightech_client_id = "vas-haus-pz"; 
 const char* rightech_topic = "haus/arduino/temperature";
 const unsigned long sendIntervalRightech = 300000;  // 5 мин
-unsigned long lastSendTimeRightech = 0;
+unsigned long lastSendTimeRightech = 10000;
 //https://dev.rightech.io/#?v=dashboard&m=dashboards&id=69f6eb5d27411287b241875a&t=journal
 //ip14922@gmail.com
 //System-1system-1
@@ -76,15 +76,17 @@ unsigned long lastSendTimeRightech = 0;
 // --- Настройки InfluxDb Grafana ---
 const String influxUrl = "https://us-central1-1.gcp.cloud2.influxdata.com/api/v2/write?org=36d3009f718d515a&bucket=bucket1&precision=s";
 const String influxToken = "Token aaIYdhng3-hZSxEd_mN7CgvqsZCiHGUHrDeUCQkGiVuYsnBfLRsQ6g3lTRsDPq8AV2NAmDQba4rAFIiubGKoCQ=="; 
-const unsigned long sendIntervalInflux = 300000; // 5 мин
-unsigned long lastSendTimeInflux = 60000;
+const unsigned long sendIntervalInflux = 60000; // 1 мин
+unsigned long lastSendTimeInflux = 5000;  //shift
 // https://grafana.com/
 // авторизовался через google
 
 
-// Переменные для усреднения
-float tempSum[3] = {0, 0, 0};
-int countSamples[3] = {0, 0, 0};
+
+// --- Настройки ydb yandex ---
+const String yandexUrl = "https://d5d77t94op5ncf1lccud.6brbn2wz.apigw.yandexcloud.net/sensors";
+const unsigned long sendIntervalYdb = 300000; // 5 мин
+unsigned long lastSendTimeYdb = 15000;  //shift
 
 
 
@@ -124,20 +126,18 @@ void loop() {
   client.loop();
   
   unsigned long currentTime = millis();
-  
-  // Отправляем данные по таймеру
   if (currentTime - lastSendTime >= sendInterval) {
-    sendTemperature(1);
-    sendTemperature(2);
-    sendTemperature(3);    
     lastSendTime = currentTime;
+    updateSensors();
+    sendToLocalQ();
   }
 
 
   currentTime = millis();
   if (currentTime - lastSendTimeRightech >= sendIntervalRightech) {
-    sendToRightech();
     lastSendTimeRightech = currentTime;
+    updateSensors();
+    sendToRightech();
   }
 
   currentTime = millis();
@@ -147,7 +147,12 @@ void loop() {
     sendToInflux();
   }
 
-
+  currentTime = millis();
+  if (currentTime - lastSendTimeYdb >= sendIntervalYdb) {
+    lastSendTimeYdb = currentTime;
+    updateSensors();
+    sendToYdb();
+  }
   
   // Короткая пауза
   delay(100);
@@ -197,85 +202,37 @@ void reconnectMQTT() {
 
 
 
-void sendTemperature(int sensorNum) {
-  DallasTemperature* sensor;
-  const char* tempTopic;
-  if( sensorNum == 1) {
-    sensor = &sensor1;
-    tempTopic = tempTopic1;
-  }
-  else if( sensorNum == 2) {
-    sensor = &sensor2;
-    tempTopic = tempTopic2;
-  }
-  else if( sensorNum == 3) {
-    sensor = &sensor3;
-    tempTopic = tempTopic3;
-  }
-  else {
-    Serial.println("Неправильный номер датчика!");
-    return;
-  }
-  
-  sensor->requestTemperatures();
-  float tempC = sensor->getTempCByIndex(0);
-  
-  if (tempC != DEVICE_DISCONNECTED_C) {
-    // Форматируем температуру (2 знак после запятой)
-    char tempStr[10];
-    dtostrf(tempC, 1, 2, tempStr);  // min 1 символа всего, 2 после запятой
-    
-    // Отправляем в local MQTT
+void sendToLocalQ(){
+  Serial.println( "Send to local queue : ");
+  for (int i = 0; i < numOfSensors; i++) { 
     if (client.connected()) {
-      if (client.publish(tempTopic, tempStr, true)) {
-        Serial.print("Отправлено: ");
-        Serial.print(tempStr);
-        Serial.print(" °C в топик ");
-        Serial.println(tempTopic);
+      if (client.publish( sensors[i].topic, sensors[i].temp.c_str(), true)) {
+        Serial.print( sensors[i].topic );
+        Serial.print( "        ");
+        Serial.print( sensors[i].temp );
+        Serial.println("  success ");
       } else {
         Serial.print("Ошибка отправки в топик ");
-        Serial.println(tempTopic);
+        Serial.println( sensors[i].topic );
       }
     } else {
       Serial.println("Локальный MQTT недоступен, пропускаем");
     }
-
-
-
-    tempSum[sensorNum - 1] += tempC;
-    countSamples[sensorNum - 1]++;
-
-    
-  } else {
-    Serial.print("Ошибка датчика ");
-    Serial.println(sensorNum);
-    client.publish(tempTopic, "", true);
-    sensor->begin(); // пробуем переинициализировать для работы в следующем цикле
   }
 }
 
 
 
 void sendToRightech() {
-
-  
-  String avg[3];
-  // Считаем среднее
-  for( int i = 0; i < 3; i++ ){
-    if( countSamples[i] == 0 ){ 
-      avg[i]="null";
-    } else {
-      avg[i] = String( tempSum[i] / countSamples[i] );
-    }
-
-  }
-
   // Формируем JSON пакет (строго под вашу модель)
   // ВНИМАНИЕ: ключи "temperature" и т.д. должны совпадать с кодами в модели Rightech
   String payload = "{";
-  payload += "\"air_outside\":" + avg[0] + ",";
-  payload += "\"air_inside\":" + avg[1] + ",";
-  payload += "\"heater\":" + avg[2];
+  for (int i = 0; i < numOfSensors; i++) {
+    if (i > 0) payload += ",";
+    String topic = String(sensors[i].topic);
+    String name = topic.substring(topic.indexOf('/') + 1);
+    payload += "\"" + name + "\":" + (sensors[i].temp == "" ? "null" : sensors[i].temp);
+  }
   payload += "}";
 
   Serial.println("Отправка в Rightech...");
@@ -291,11 +248,6 @@ void sendToRightech() {
      rightechClient.publish(rightech_topic, payload.c_str());
   }
 
-  // Сброс накопителей
-  for( int i = 0; i < 3; i++){
-    tempSum[i] = 0;
-    countSamples[i] = 0;
-  }
   rightechClient.disconnect(); // Отключаемся, чтобы не висеть в лимитах
 }
 
@@ -350,9 +302,55 @@ void sendToInflux(){
       }
       
     } else {
-      Serial.println("Ошибка: Нет подключения к Wi-Fi!");
+      Serial.println("Ошибка: недоступен сервер  " + influxUrl);
     }
 
+
+}
+
+
+
+void sendToYdb(){
+  
+    if (WiFi.status() == WL_CONNECTED) {
+      // Создаем объект защищенного клиента
+      WiFiClientSecure client;
+      client.setInsecure(); // Игнорируем проверку отпечатков сертификатов ради стабильности
+      HTTPClient http;
+
+      // ====================================================
+      //  ОТПРАВКА В INFLUXDB CLOUD (Формат Line Protocol)
+      // ====================================================
+      Serial.print("Отправка в Yandex ydb ");
+      if (http.begin(client, yandexUrl)) {
+        http.addHeader("Content-Type", "application/json");
+
+        // Собираем JSON строку для Яндекса
+       //        String jsonPayload = "{\"sensor_id\":\"test_arduino_8266\",\"value\":" + String(mock_temp) + "}";
+
+        String payload = "{";
+        for (int i = 0; i < numOfSensors; i++) {
+          if (i > 0) payload += ",";
+          String topic = String(sensors[i].topic);
+          String name = topic.substring(topic.indexOf('/') + 1);
+          payload += "\"" + name + "\":" + (sensors[i].temp == "" ? "null" : sensors[i].temp);
+        }
+        payload += "}";
+
+        int httpCode = http.POST(payload);
+        
+        if (httpCode > 0) {
+          Serial.printf("Успешно! Ответ сервера: %d\n", httpCode);
+          // Полнотекстовый ответ Яндекса (можно раскомментировать для отладки):
+          // String response = http.getString(); Serial.println(response);
+        } else {
+          Serial.printf("Ошибка! Причина: %s\n", http.errorToString(httpCode).c_str());
+        }
+        http.end();
+      } else {
+        Serial.println("Ошибка: Нет доступа к серверу " + yandexUrl );
+      }
+  }   
 
 }
 
